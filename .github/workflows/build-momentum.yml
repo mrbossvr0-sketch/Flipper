@@ -1,26 +1,14 @@
-# Build the standalone PrivateLab app for the Momentum firmware SDK.
-# No Flipper connected and no firmware flashing. Download the .fap from Artifacts.
+# PrivateLab 3.1 - Momentum GitHub Actions, compatible with flattened GitHub uploads.
+# Builds an external .fap app; does not flash or modify firmware.
 name: Build PrivateLab for Momentum
 
 on:
   push:
-    paths:
-      - 'applications_user/private_lab/**'
-      - '.github/workflows/build-momentum.yml'
-      - 'tests/**'
-      - 'test_host.sh'
-      - 'desktop/**'
-  pull_request:
-    paths:
-      - 'applications_user/private_lab/**'
-      - '.github/workflows/build-momentum.yml'
-      - 'tests/**'
-      - 'test_host.sh'
-      - 'desktop/**'
+    branches: [main]
   workflow_dispatch:
     inputs:
       channel:
-        description: 'Momentum SDK channel; match the firmware on your Flipper'
+        description: Momentum SDK matching your Flipper firmware
         type: choice
         options:
           - release
@@ -32,29 +20,58 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Host tests and source checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Check host compiler and Python
-        run: |
-          clang --version
-          python3 --version
-      - name: Run source syntax and logic tests
-        run: ./test_host.sh
-
   build:
-    name: Momentum FAP (${{ inputs.channel || 'release' }})
-    needs: check
-    runs-on: ubuntu-latest
+    name: Test and build Momentum FAP
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout repository
+      - name: Check out files
         uses: actions/checkout@v4
 
-      - name: Build using Momentum firmware SDK
-        id: momentum_build
+      - name: Fix folder structure for flat GitHub uploads
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f applications_user/private_lab/application.fam ]; then
+            echo 'App already has the expected directory layout.'
+            exit 0
+          fi
+
+          echo 'Preparing the original PrivateLab files uploaded in the root folder...'
+          for file in application.fam icon.png private_lab.c obd_parser.c obd_parser.h \
+                      test_obd.c test_report.py report.py mock.h \
+                      furi.h furi_hal.h gui.h canvas.h view_port.h \
+                      input.h storage.h expansion.h; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing $file in repository root. Upload the complete PrivateLab project ZIP contents."
+              exit 1
+            fi
+          done
+
+          mkdir -p applications_user/private_lab tests/mock_sdk/gui \
+                   tests/mock_sdk/input tests/mock_sdk/storage \
+                   tests/mock_sdk/expansion desktop
+          cp application.fam icon.png private_lab.c obd_parser.c obd_parser.h \
+             applications_user/private_lab/
+          cp test_obd.c test_report.py tests/
+          cp report.py desktop/
+          cp mock.h furi.h furi_hal.h tests/mock_sdk/
+          cp gui.h tests/mock_sdk/gui/gui.h
+          cp canvas.h tests/mock_sdk/gui/canvas.h
+          cp view_port.h tests/mock_sdk/gui/view_port.h
+          cp input.h tests/mock_sdk/input/input.h
+          cp storage.h tests/mock_sdk/storage/storage.h
+          cp expansion.h tests/mock_sdk/expansion/expansion.h
+          echo 'Folder structure ready.'
+
+      - name: Run PrivateLab host tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Invoking Bash directly avoids permission denied (exit 126) on GitHub uploads.
+          bash test_host.sh
+
+      - name: Compile app using Momentum SDK
+        id: build_app
         uses: flipperdevices/flipperzero-ufbt-action@v0.1
         with:
           app-dir: applications_user/private_lab
@@ -62,20 +79,16 @@ jobs:
           sdk-channel: ${{ inputs.channel || 'release' }}
           ufbt-args: ''
 
-      - name: Verify produced FAP
+      - name: Inspect built files
         shell: bash
         run: |
           set -euo pipefail
-          test -s applications_user/private_lab/dist/private_lab.fap
-          ls -lh applications_user/private_lab/dist/private_lab.fap
-          sha256sum applications_user/private_lab/dist/private_lab.fap | tee applications_user/private_lab/dist/SHA256SUMS.txt
+          find applications_user/private_lab/dist -type f -name '*.fap' -print -exec sha256sum {} \;
 
-      - name: Upload installable app artifact
+      - name: Upload installable FAP
         uses: actions/upload-artifact@v4
         with:
-          name: PrivateLab-Momentum-${{ steps.momentum_build.outputs.suffix }}
-          path: |
-            applications_user/private_lab/dist/private_lab.fap
-            applications_user/private_lab/dist/SHA256SUMS.txt
+          name: PrivateLab-Momentum-${{ steps.build_app.outputs.suffix }}
+          path: ${{ steps.build_app.outputs.fap-artifacts }}
           if-no-files-found: error
           retention-days: 30
