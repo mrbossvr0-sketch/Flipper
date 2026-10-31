@@ -1,0 +1,81 @@
+# Build the standalone PrivateLab app for the Momentum firmware SDK.
+# No Flipper connected and no firmware flashing. Download the .fap from Artifacts.
+name: Build PrivateLab for Momentum
+
+on:
+  push:
+    paths:
+      - 'applications_user/private_lab/**'
+      - '.github/workflows/build-momentum.yml'
+      - 'tests/**'
+      - 'test_host.sh'
+      - 'desktop/**'
+  pull_request:
+    paths:
+      - 'applications_user/private_lab/**'
+      - '.github/workflows/build-momentum.yml'
+      - 'tests/**'
+      - 'test_host.sh'
+      - 'desktop/**'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Momentum SDK channel; match the firmware on your Flipper'
+        type: choice
+        options:
+          - release
+          - dev
+        required: true
+        default: release
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Host tests and source checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check host compiler and Python
+        run: |
+          clang --version
+          python3 --version
+      - name: Run source syntax and logic tests
+        run: ./test_host.sh
+
+  build:
+    name: Momentum FAP (${{ inputs.channel || 'release' }})
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build using Momentum firmware SDK
+        id: momentum_build
+        uses: flipperdevices/flipperzero-ufbt-action@v0.1
+        with:
+          app-dir: applications_user/private_lab
+          sdk-index-url: https://up.momentum-fw.dev/firmware/directory.json
+          sdk-channel: ${{ inputs.channel || 'release' }}
+          ufbt-args: ''
+
+      - name: Verify produced FAP
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s applications_user/private_lab/dist/private_lab.fap
+          ls -lh applications_user/private_lab/dist/private_lab.fap
+          sha256sum applications_user/private_lab/dist/private_lab.fap | tee applications_user/private_lab/dist/SHA256SUMS.txt
+
+      - name: Upload installable app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrivateLab-Momentum-${{ steps.momentum_build.outputs.suffix }}
+          path: |
+            applications_user/private_lab/dist/private_lab.fap
+            applications_user/private_lab/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
