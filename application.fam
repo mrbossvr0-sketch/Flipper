@@ -1,0 +1,13 @@
+App(
+    appid="private_lab",
+    name="PrivateLab MNTM",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="privatelab_app",
+    cdefines=["PRIVATE_LAB_VERSION=31"],
+    stack_size=4096,
+    fap_category="Tools",
+    fap_description="Momentum-compatible passive RF, GPIO, UART and OBD diagnostics",
+    fap_author="PrivateLab community project",
+    fap_version="3.1.0",
+    fap_icon="icon.png",
+)
